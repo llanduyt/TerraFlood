@@ -36,7 +36,7 @@ Flood maps are made for all Sentinel-1 images in the provided time range. The Se
 - 6 = probably flooded forest (PFF)
 - 7 = invisible forest (IF)
 
-Alternatively, the algorithm can be ran over an area outside Flanders. To do so, L227-254 should be run, and the following layers should be provided:
+Alternatively, the algorithm can be ran over an area outside Flanders. To do so, L227-254 should be ran, and the following layers should be provided:
 - VV band of flood image
 - VH band of flood image
 - VV band of ref. image
