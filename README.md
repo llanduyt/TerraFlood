@@ -5,7 +5,7 @@ This repository contains the source codes used in the following publication:
 
 Landuyt et al., (in review). "Towards operational flood monitoring in Flanders using Sentinel-1". IEEE JSTARS.
 
-The code itself can be referenced by the following DOI: [![DOI](https://zenodo.org/badge/306652567.svg)](https://zenodo.org/badge/latestdoi/306652567)
+The code itself can be referenced by the following DOI: [![DOI](https://zenodo.org/badge/346770017.svg)](https://zenodo.org/badge/latestdoi/346770017)
 
 ### Prerequisites
 This repository is mainly built using the following packages:
