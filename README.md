@@ -44,9 +44,9 @@ Alternatively, the algorithm can be ran over an area outside Flanders. To do so,
 - VV increase band
 - ratio increase band
 - tree cover
+- elevation
 - permanent water layer (optional)
 - pluvial flood probability (optional)
 - fluvial flood probability (optional)
 - pluvial flood depth (optional)
 - fluvial flood depth (optional)
-                                        dem
