@@ -9,7 +9,6 @@ import numpy as np
 from datetime import datetime as dt
 from scipy import ndimage as nd
 from scipy import stats
-import contextily as cx
 import matplotlib.pyplot as plt
 from matplotlib import colors
 from matplotlib.lines import Line2D
@@ -17,6 +16,10 @@ from sklearn import preprocessing
 from skimage import measure
 from skimage import morphology as morph
 from skimage import segmentation as seg
+
+no_hpc = False
+if no_hpc:
+    import contextily as cx
 
 wgs = "epsg:4326"
 utm = "epsg:32631"
@@ -39,7 +42,7 @@ dir_lc = os.path.join(dir_root, "Ancillary_Data", "BBK5_15", "GeoTIFF")
 dir_dem = os.path.join(dir_root, "Ancillary_Data", "DHM5", "GEOTIFF")
 
 
-def make_floodmap(floodmap, extent, filename, flood_location, flood_date, basemap_source=cx.providers.Stamen.TonerLite):
+def make_floodmap(floodmap, extent, filename, flood_location, flood_date, basemap_source=None):
     """
     Make plot of flood map and save to .png figure
 
@@ -70,8 +73,9 @@ def make_floodmap(floodmap, extent, filename, flood_location, flood_date, basema
     ax.imshow(floodmap, extent=map_extent, cmap=cmap_cc, vmin=-1, vmax=7)
     ax.set_xlim(extent[0], extent[2])
     ax.set_ylim(extent[1], extent[3])
-    cx.add_basemap(ax, crs=utm, source=basemap_source)
-    ax.imshow(floodmap, extent=map_extent, cmap=cmap_cc, vmin=-1, vmax=7)
+    if no_hpc:  # basemap = cx.providers.Stamen.TonerLite
+        cx.add_basemap(ax, crs=utm, source=basemap_source)
+        ax.imshow(floodmap, extent=map_extent, cmap=cmap_cc, vmin=-1, vmax=7)
     ax.legend(leg_handles, leg_labels, bbox_to_anchor=(0.5, -0.05), loc=9, ncol=7, fontsize=14)
     plt.text(0.5, 1.03, "Flooding in {} on {}".format(flood_location, dt.strftime(flood_date, "%Y-%m-%d %H:%M")),
              fontsize=16, horizontalalignment="center", transform=ax.transAxes)
@@ -142,7 +146,7 @@ def apply_mmu(array, mmu, background=0, connectivity=2):
 
 def combine_footprints(array1, array2, mmu_core=1):
     """ 
-    Combine arrays and only maintain objects with a union >= mmu_core
+    Combine arrays and only maintain objects with an intersection >= mmu_core
 
     Inputs
     array1: nd array
@@ -340,13 +344,13 @@ def remove_smallobjects(floodmap, class_labels, mmu=5):
             return l_dl
 
     px_modn = nd.generic_filter(floodmap, modal, footprint=np.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]]),
-                                mode="constant", cval=l_dl)
+                                mode="constant", cval=l_dl)  # get most occuring neighbour (except DL & IF) for every pixel
     for l_class in class_labels:
-        class_obs, n_labels = nd.label(floodmap == l_class, structure=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))
-        class_ob_labels, class_objects_sizes = np.unique(class_obs[class_obs != 0], return_counts=True)
-        class_ob_labels = class_ob_labels[class_objects_sizes <= mmu]
+        class_obs, _ = nd.label(floodmap == l_class, structure=np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]]))  # label all objects of class l_class
+        class_ob_labels, class_objects_sizes = np.unique(class_obs[class_obs != 0], return_counts=True)  # get list of object labels and sizes
+        class_ob_labels = class_ob_labels[class_objects_sizes <= mmu]  # get list of objects smaller than MMU
         if len(class_ob_labels) > 0:
-            class_ob_modn = nd.labeled_comprehension(px_modn, class_obs, class_ob_labels, find_mode, int, 0)
+            class_ob_modn = nd.labeled_comprehension(px_modn, class_obs, class_ob_labels, find_mode, int, 0)  # get most occurring neighbor value for each object
             for l_ob, mod_ob in zip(class_ob_labels, class_ob_modn):
                 floodmap[class_obs == l_ob] = mod_ob
     return floodmap
@@ -389,8 +393,7 @@ def fill_holes(floodmap, flood_vv, flood_vh, ref_vv, ref_vh, t_vv, t_vh, class_l
         h_fvh = np.array([el["mean_intensity"] for el in measure.regionprops(holes, flood_vh)])
         h_rvv = np.array([el["mean_intensity"] for el in measure.regionprops(holes, ref_vv)])
         h_rvh = np.array([el["mean_intensity"] for el in measure.regionprops(holes, ref_vh)])
-        h_tofill = (h_area <= mmu) | ((h_fvv < t_vv) & (h_fvh < t_vh+1)) | \
-                       ((h_fvh < t_vh) & (h_fvv < t_vv+1))
+        h_tofill = (h_area <= mmu) | ((h_fvv < t_vv) & (h_fvh < t_vh+1)) | ((h_fvh < t_vh) & (h_fvv < t_vv+1))
         h_label = h_label[h_tofill]
         h_area = h_area[h_tofill]
         h_fvv = h_fvv[h_tofill]
@@ -538,7 +541,7 @@ def apply_terraflood(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees, p
     """
     # Segmentation
     seg_labels = apply_quickseg(np.transpose(np.array([ref_vh, ref_vv, flood_vh, flood_vv]), (1, 2, 0)).copy(),
-                                    ratio=ratio, maxdist=maxdist, kernel_window_size=kernel_ws)
+                                ratio=ratio, maxdist=maxdist, kernel_window_size=kernel_ws)
 
     # Removal single-pixel objects
     labels, sizes = np.unique(seg_labels, return_counts=True)
@@ -574,25 +577,16 @@ def apply_terraflood(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees, p
     del seg_labels, ref_vh_ob_list, ref_vv_ob_list, flood_vh_ob_list, flood_vv_ob_list
 
     # Thresholding
-    # print("{} - Pixel-based thresholding...".format(dt.now()))
     pw_px = (flood_vv < t_vv) & (flood_vh < t_vh) & (ref_vv < t_vv) & (ref_vh < t_vh)
     flood_px = (flood_vv < t_vv) & (flood_vh < t_vh) & (pw_px == 0)
-    # print("{} - Object-based thresholding...".format(dt.now()))
     pw_ob = (flood_vv_ob < t_vv) & (flood_vh_ob < t_vh) & (ref_vv_ob < t_vv) & (ref_vh_ob < t_vh)
     flood_ob = (flood_vv_ob < t_vv) & (flood_vh_ob < t_vh) & (pw_ob == 0)
-    # print("{} - Combination of pixel- and object-based thresholding...".format(dt.now()))
     pw_combo = combine_footprints(pw_px, pw_ob)
     flood_combo = combine_footprints(flood_px, flood_ob)
     floodmap = np.zeros(pw_combo.shape, dtype="int")
     floodmap[flood_combo] = l_of
     floodmap[pw_combo] = l_pw
     del pw_combo, flood_combo
-
-    # Region grow into groups of pixels satisfying class definitions
-    # print("{} - Region growing into PW areas...".format(dt.now()))
-    floodmap = rg(floodmap, [l_pw, l_of], l_pw, (pw_px & pw_ob))
-    # print("{} - Region growing into OF areas...".format(dt.now()))
-    floodmap = rg(floodmap, [l_pw, l_of], l_of, (flood_px & flood_ob))
 
     # Remove unreliable PW objects
     # print("{} - Removing unreliable PW areas...".format(dt.now()))
@@ -615,7 +609,6 @@ def apply_terraflood(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees, p
         del pw_objects, pw_props, pw_labels, pw_water, pw_og  # , pw_trees
 
     # Indicate significantly large pixel-based objects
-    # print("{} - Indication of large pixel groups...".format(dt.now()))
     flood_onlypx = (floodmap == 0) & (flood_px != 0)
     flood_px_ids_array, _ = measure.label(flood_onlypx, background=0, connectivity=2, return_num=True)
     flood_px_props = measure.regionprops(flood_px_ids_array)
@@ -636,22 +629,19 @@ def apply_terraflood(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees, p
         del pf_objects, pf_props, pf_labels, pf_og
 
     #  RG into FV areas
-    # print("{} - Region growing into flooded vegetation areas...".format(dt.now()))
     if fv_seeds == "all":
-        seeds = [l_of, l_pf, l_pw, l_fv]
+        seeds = [l_of, l_pf, l_pw, l_ltf, l_fv]
     elif fv_seeds == "of":
         seeds = [l_of, l_fv]
     floodmap = rg(floodmap, seeds, l_fv, (inc_vv > t_incvv) & (inc_r > t_incr))
 
     #  RG into FF
-    # print("{} - Region growing into flooded forest areas...".format(dt.now()))
     if "depth" in ff_inclusion:
         floodmap = rg_ff(floodmap, trees, ogp, ogf, odp, odf, [l_of], ff_inclusion=ff_inclusion, dem=dem)
     else:
         floodmap = rg_ff(floodmap, trees, ogp, ogf, odp, odf, [l_of], ff_inclusion=ff_inclusion)
 
     # Clean up
-    # print("{} - Cleaning up map...".format(dt.now()))
     # Remove small objects
     floodmap = remove_smallobjects(floodmap, [l_of, l_pw, l_fv, l_ltf, l_pf], mmu=mmu_holes)
     # Fill holes
@@ -737,38 +727,19 @@ def apply_terrafloodpx(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees,
     # Get core
     pwmap_combo = apply_mmu(pwmap_vv & pwmap_vh, mmu_core)
     floodmap_combo = apply_mmu(floodmap_vv & floodmap_vh, mmu_core)
-    # RG from core for PW
-    pwmap_combo = rg(pwmap_combo, [1], 1, (pwmap_vv & pwmap_vh), selem=morph.selem.rectangle(3, 3))
     # RG from core for OF
     floodmap_vv_kind = (flood_vv < t_vv + 1) & (pwmap_vv == 0)
     floodmap_vh_kind = (flood_vh < t_vh + 1) & (pwmap_vh == 0)
     floodmap_combo = rg(floodmap_combo, [1], 1, (floodmap_vv & floodmap_vh_kind) | (floodmap_vv_kind & floodmap_vh),
                         selem=morph.selem.rectangle(3, 3))
-    del floodmap_vv_kind, floodmap_vh_kind
+
     # Combine PW and OF
     floodmap = np.zeros(pwmap_combo.shape, dtype="int")
     floodmap[floodmap_combo] = l_of
     floodmap[pwmap_combo] = l_pw
     del pwmap_combo, floodmap_combo
 
-    # Region grow into groups of pixels satisfying class definitions
-    # print("{} - Region growing into PW areas...".format(dt.now()))
-    floodmap = rg(floodmap, [l_pw, l_of], l_pw, (pwmap_vv & pwmap_vh))
-    del pwmap_vh, pwmap_vv
-    # print("{} - Region growing into OF areas...".format(dt.now()))
-    floodmap = rg(floodmap, [l_pw, l_of], l_of, (floodmap_vv & floodmap_vh))
-    del floodmap_vv, floodmap_vh
-
-    # Apply closing to refine flood edges + remove small RG patches
-    # print("{} - Refining edges and removing small objects...".format(dt.now()))
-    pwmap_combo = remove_smallobjects(morph.binary_closing(floodmap == l_pw, selem=morph.selem.disk(1)), [1], mmu=2)
-    floodmap_combo = remove_smallobjects(morph.binary_closing(floodmap == l_of, selem=morph.selem.disk(1)), [1], mmu=2)
-    floodmap = np.zeros(pwmap_combo.shape, dtype="int")
-    floodmap[floodmap_combo] = l_of
-    floodmap[pwmap_combo] = l_pw
-
     # Remove unreliable PW objects
-    # print("{} - Removing unreliable PW areas...".format(dt.now()))
     if pw_selection == "bbk":
         pw_objects = measure.label(floodmap == l_pw, background=0)
         pw_props = measure.regionprops(pw_objects, pw == 1)
@@ -787,15 +758,13 @@ def apply_terrafloodpx(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees,
         floodmap[np.isin(pw_objects, pw_labels[(pw_water < pw_perc) & (pw_og >= pw_perc)])] = l_ltf
         del pw_objects, pw_props, pw_labels, pw_water, pw_og  # , pw_trees
 
-    # Region grow into small OF objects
-    # print("{} - Region growing into small OF areas...".format(dt.now()))
+    # Region grow into regions that are small or satisfy kind definition
     seed_labels = [l_of, l_pw, l_pf]
     grow_criterium = ((flood_vv < t_vv + 1) & (flood_vh < t_vh)) | ((flood_vv < t_vv) & (flood_vh < t_vh + 1))
     floodmap = rg(floodmap, seed_labels, l_pf, grow_criterium=grow_criterium)
     del grow_criterium
 
     # Filter PF objects
-    # print("{} - Filtering PF objects...".format(dt.now()))
     if pf_selection == "none":
         floodmap[floodmap == l_pf] = l_dl
     elif pf_selection == "risk":
@@ -807,7 +776,6 @@ def apply_terrafloodpx(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees,
         del pf_objects, pf_props, pf_labels, pf_og
 
     #  RG into FV
-    # print("{} - Region growing into flooded vegetation areas...".format(dt.now()))
     if fv_seeds == "all":
         seeds = [l_of, l_pf, l_pw, l_fv]
     elif fv_seeds == "of":
@@ -815,7 +783,6 @@ def apply_terrafloodpx(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees,
     floodmap = rg(floodmap, seeds, l_fv, (inc_vv > t_incvv) & (inc_r > t_incr))
 
     #  RG into FF
-    # print("{} - Region growing into flooded forest areas...".format(dt.now()))
     if "depth" in ff_inclusion:
         floodmap = rg_ff(floodmap, trees, ogp, ogf, odp, odf, [l_of], ff_inclusion=ff_inclusion, dem=dem)
     else:
@@ -823,22 +790,18 @@ def apply_terrafloodpx(flood_vv, flood_vh, ref_vv, ref_vh, inc_vv, inc_r, trees,
 
     # Clean up
     # Remove small objects (pw, of, fv, pf)
-    # print("{} - Cleaning up map: removing small objects...".format(dt.now()))
     floodmap = remove_smallobjects(floodmap, [l_of, l_pw, l_fv, l_ltf, l_pf], mmu=mmu_holes)
     # Final closing to refine edges
-    # print("{} - Cleaning up map: refining edges...".format(dt.now()))
     floodmap_old = np.copy(floodmap)
     for l_class in [l_pw, l_of, l_pf, l_fv]:  # order here determines priority!
         floodmap_class = morph.binary_closing(floodmap_old == l_class, selem=morph.selem.disk(1))
         floodmap[(floodmap == 0) & (floodmap_class == 1)] = l_class
     del floodmap_old
     # Fill holes
-    # print("{} - Cleaning up map: filling holes...".format(dt.now()))
     floodmap = fill_holes(floodmap, flood_vv, flood_vh, ref_vv, ref_vh, t_vv, t_vh, class_labels_holes=[l_dl, l_if],
                           mmu=mmu_holes)
 
-    # Indicate forested areas where floodmap state is unsure
-    # print("{} - Indication of forested, unsure areas...".format(dt.now()))
+    # Indicate forested areas where floodmap state is unknown
     floodmap[(floodmap == 0) & (trees == 1)] = l_if
 
     # Mask NoData areas
